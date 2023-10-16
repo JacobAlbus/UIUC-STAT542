@@ -1,13 +1,11 @@
 import pandas as pd
 import numpy as np
 import xgboost as xgb
-import time
 
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import mean_squared_error
-from sklearn.linear_model import LassoCV, RidgeCV, ElasticNetCV
+from sklearn.linear_model import ElasticNetCV
 
-def lasso_preprocess_data(data, train_columns=None, up_quantile = None):
+def elastic_preprocess_data(data, train_columns=None, up_quantile = None):
     #Winsorize features
     winsor_features = ["Lot_Frontage", "Lot_Area", "Mas_Vnr_Area", "BsmtFin_SF_2", "Bsmt_Unf_SF", 
                           "Total_Bsmt_SF", "Second_Flr_SF", 'First_Flr_SF', "Gr_Liv_Area", 
@@ -46,24 +44,22 @@ def lasso_preprocess_data(data, train_columns=None, up_quantile = None):
         return data, up_quantile
 
 
-def lasso_fit_and_predict(i):
-    train_data = pd.read_csv(f'data/fold{i}/train.csv')
-    test_data = pd.read_csv(f'data/fold{i}/test.csv')
-    y_test = pd.read_csv(f'data/fold{i}/test_y.csv')
+def elastic_fit_and_predict():
+    train_data = pd.read_csv('train.csv')
+    test_data = pd.read_csv('test.csv')
 
     # Dropping outliers as suggested by data documentation page, taking a more aggressive approach i.e. 3500 limit vs 4000
     train_data = train_data[train_data['Gr_Liv_Area'] <= 3800]
 
     y_train = np.log(train_data['Sale_Price'])
-    y_test = np.log(y_test["Sale_Price"])
 
     train_data.drop(columns=["Sale_Price"], inplace=True)
 
     # Preprocess train data
-    x_train_pp, up_quantile = lasso_preprocess_data(train_data, None, None)
+    x_train_pp, up_quantile = elastic_preprocess_data(train_data, None, None)
 
     # Preprocess test data using columns of preprocessed train data and quantile information from train_data
-    x_test_pp = lasso_preprocess_data(test_data, x_train_pp.columns, up_quantile)
+    x_test_pp = elastic_preprocess_data(test_data, x_train_pp.columns, up_quantile)
 
     # Standardizing test and train data before regression
     scaler1 = StandardScaler()
@@ -82,9 +78,6 @@ def lasso_fit_and_predict(i):
     
     #make predictions and compute RMSE
     elastic_pred = model_elastic.predict(x_test_pp)
-    elastic_rmse = np.sqrt(mean_squared_error(elastic_pred, y_test))
-
-    print(f"ElasticNet {i} RMSE", elastic_rmse)
     
     #Save predictions
     submission_df = pd.DataFrame({
@@ -107,7 +100,7 @@ def preprocess_xgb_features(data, train_columns=None):
         y = None
 
     # Select all features except Sales Price
-    best_features = list(data.columns)[:-1]
+    best_features = list(data.columns)[1:-1]
     data = data[best_features]
 
     # One hot encoding of nominal features
@@ -123,40 +116,31 @@ def preprocess_xgb_features(data, train_columns=None):
 
     return X, y
 
-def train_xgb_model(i):
-  X_train, y_train = preprocess_xgb_features(pd.read_csv(f"data/fold{i}/train.csv"))
+def train_xgb_model():
+  X_train, y_train = preprocess_xgb_features(pd.read_csv("train.csv"))
 
-  cv_eta = 0.025
-  cv_T = 10000
-
-  X_test, _ = preprocess_xgb_features(pd.read_csv(f"data/fold{i}/test.csv"), X_train.columns)  
+  cv_eta = 0.05
+  cv_T = 5000
+  
+  X_test, _ = preprocess_xgb_features(pd.read_csv("test.csv"), X_train.columns)  
 
   clf = xgb.XGBRegressor(n_estimators=cv_T, learning_rate=cv_eta, 
-                        max_depth=6, subsample=0.5, tree_method="exact")
+                        max_depth=6, colsample_bytree=0.5, tree_method="exact")
   clf.fit(X_train, y_train)
   yhat = clf.predict(X_test)
 
-
-  y = np.log(pd.read_csv(f"data/fold{i}/test_y.csv")["Sale_Price"])
-  elastic_rmse = np.sqrt(mean_squared_error(yhat, y))
-  print(f"XGB {i} RMSE", elastic_rmse)
-
-  output = pd.DataFrame({"PID" : X_test["PID"], "Sale_Price" : np.exp(yhat) })
+  test_PID = pd.read_csv(f"test.csv")["PID"]
+  output = pd.DataFrame({"PID" : test_PID, "Sale_Price" : np.exp(yhat) })
   output.to_csv("mysubmission2.txt", index=False)
 
-for i in range(1,11):
-    print(f"=== FOLD {i} ===")
-    start_time = time.time()
-    lasso_fit_and_predict(i)
+elastic_fit_and_predict()
+train_xgb_model()
 
-    print("Elastinet runtime:", time.time() - start_time)
-    start_time = time.time()
+# test_y = np.log(pd.read_csv("test_y.csv")["Sale_Price"])
+# lasso_y = np.log(pd.read_csv("mysubmission1.txt")["Sale_Price"])
 
-    train_xgb_model(i)
+# print(np.sqrt(np.mean((test_y - lasso_y)**2)))
 
-    print("XGBoost runtime:", time.time() - start_time)
+# boost_y = np.log(pd.read_csv("mysubmission2.txt")["Sale_Price"])
 
-# y_hat = np.log(pd.read_csv("mysubmission1.txt")["Sale_Price"])
-# y = np.log(pd.read_csv("test_y.csv")["Sale_Price"])
-
-# print(np.sqrt(np.mean((y_hat - y)**2)))
+# print(np.sqrt(np.mean((test_y - boost_y)**2)))

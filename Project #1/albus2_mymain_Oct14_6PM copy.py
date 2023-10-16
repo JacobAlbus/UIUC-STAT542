@@ -1,24 +1,10 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-# In[1]:
-
-
-#Import modules
 import pandas as pd
 import numpy as np
+import xgboost as xgb
+
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import mean_squared_error
-from sklearn.linear_model import LassoCV, RidgeCV, ElasticNetCV
+from sklearn.linear_model import ElasticNetCV
 
-random_seed = 42
-np.random.seed(random_seed)
-
-
-# In[2]:
-
-
-#Load and preprocess data
 def lasso_preprocess_data(data, train_columns=None, up_quantile = None):
     #Winsorize features
     winsor_features = ["Lot_Frontage", "Lot_Area", "Mas_Vnr_Area", "BsmtFin_SF_2", "Bsmt_Unf_SF", 
@@ -58,19 +44,14 @@ def lasso_preprocess_data(data, train_columns=None, up_quantile = None):
         return data, up_quantile
 
 
-# In[3]:
-
-
 def lasso_fit_and_predict():
     train_data = pd.read_csv('train.csv')
     test_data = pd.read_csv('test.csv')
-    y_test= pd.read_csv('test_y.csv')
 
     # Dropping outliers as suggested by data documentation page, taking a more aggressive approach i.e. 3500 limit vs 4000
     train_data = train_data[train_data['Gr_Liv_Area'] <= 3800]
 
     y_train = np.log(train_data['Sale_Price'])
-    y_test = np.log(y_test["Sale_Price"])
 
     train_data.drop(columns=["Sale_Price"], inplace=True)
 
@@ -97,9 +78,6 @@ def lasso_fit_and_predict():
     
     #make predictions and compute RMSE
     elastic_pred = model_elastic.predict(x_test_pp)
-    elastic_rmse = np.sqrt(mean_squared_error(elastic_pred, y_test))
-
-    print("ElasticNet RMSE", elastic_rmse)
     
     #Save predictions
     submission_df = pd.DataFrame({
@@ -109,4 +87,51 @@ def lasso_fit_and_predict():
     
     submission_df.to_csv('mysubmission1.txt', index=False)
 
+
+def preprocess_xgb_features(data, train_columns=None):
+    # Some values in Mas_Vnr_Type and Misc_feature have a Nan float value instead of just a "None" string
+    data = data.fillna('None')
+    # Some homes don't have garages so replace their "None" string with 0
+    data["Garage_Yr_Blt"] = data["Garage_Yr_Blt"].replace("None", 0)
+
+    try:
+        y = np.log(data["Sale_Price"])
+    except KeyError:
+        y = None
+
+    # Select all features except Sales Price
+    best_features = list(data.columns)[1:-1]
+    data = data[best_features]
+
+    # One hot encoding of nominal features
+    X = pd.get_dummies(data[best_features])
+
+    # Handle column mismatch from one hot encoding
+    if train_columns is not None:
+        missing_columns = set(train_columns) - set(X.columns)
+        for column in missing_columns:
+            X[column] = 0
+        # Ensure the order of column in the test set is in the same order than in train set
+        X = X[train_columns]
+
+    return X, y
+
+def train_xgb_model():
+  X_train, y_train = preprocess_xgb_features(pd.read_csv("train.csv"))
+
+  cv_eta = 0.05
+  cv_T = 5000
+  
+  X_test, _ = preprocess_xgb_features(pd.read_csv("test.csv"), X_train.columns)  
+
+  clf = xgb.XGBRegressor(n_estimators=cv_T, learning_rate=cv_eta, 
+                        max_depth=6, colsample_bytree=0.5, tree_method="exact")
+  clf.fit(X_train, y_train)
+  yhat = clf.predict(X_test)
+
+  test_PID = pd.read_csv(f"test.csv")["PID"]
+  output = pd.DataFrame({"PID" : test_PID, "Sale_Price" : np.exp(yhat) })
+  output.to_csv("mysubmission2.txt", index=False)
+
 lasso_fit_and_predict()
+train_xgb_model()
