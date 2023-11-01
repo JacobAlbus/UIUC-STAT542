@@ -5,7 +5,7 @@ import xgboost as xgb
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import ElasticNetCV
 
-def lasso_preprocess_data(data, train_columns=None, up_quantile = None):
+def elastic_preprocess_data(data, train_columns=None, up_quantile = None):
     #Winsorize features
     winsor_features = ["Lot_Frontage", "Lot_Area", "Mas_Vnr_Area", "BsmtFin_SF_2", "Bsmt_Unf_SF", 
                           "Total_Bsmt_SF", "Second_Flr_SF", 'First_Flr_SF', "Gr_Liv_Area", 
@@ -44,7 +44,7 @@ def lasso_preprocess_data(data, train_columns=None, up_quantile = None):
         return data, up_quantile
 
 
-def lasso_fit_and_predict():
+def elastic_fit_and_predict():
     train_data = pd.read_csv('train.csv')
     test_data = pd.read_csv('test.csv')
 
@@ -56,10 +56,10 @@ def lasso_fit_and_predict():
     train_data.drop(columns=["Sale_Price"], inplace=True)
 
     # Preprocess train data
-    x_train_pp, up_quantile = lasso_preprocess_data(train_data, None, None)
+    x_train_pp, up_quantile = elastic_preprocess_data(train_data, None, None)
 
     # Preprocess test data using columns of preprocessed train data and quantile information from train_data
-    x_test_pp = lasso_preprocess_data(test_data, x_train_pp.columns, up_quantile)
+    x_test_pp = elastic_preprocess_data(test_data, x_train_pp.columns, up_quantile)
 
     # Standardizing test and train data before regression
     scaler1 = StandardScaler()
@@ -133,5 +133,14 @@ def train_xgb_model():
   output = pd.DataFrame({"PID" : test_PID, "Sale_Price" : np.exp(yhat) })
   output.to_csv("mysubmission2.txt", index=False)
 
-lasso_fit_and_predict()
+elastic_fit_and_predict()
 train_xgb_model()
+
+# test_y = np.log(pd.read_csv("test_y.csv")["Sale_Price"])
+# lasso_y = np.log(pd.read_csv("mysubmission1.txt")["Sale_Price"])
+
+# print(np.sqrt(np.mean((test_y - lasso_y)**2)))
+
+# boost_y = np.log(pd.read_csv("mysubmission2.txt")["Sale_Price"])
+
+# print(np.sqrt(np.mean((test_y - boost_y)**2)))
